@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Info, AlertTriangle, Loader2, Camera, Clapperboard, UserPlus, Key } from 'lucide-react';
 import PhotoUploader from './components/PhotoUploader';
@@ -6,7 +7,8 @@ import CameraControls from './components/CameraControls';
 import ResultGallery from './components/ResultGallery';
 import PersonaCard from './components/PersonaCard';
 import PersonaCreator from './components/PersonaCreator';
-import { Persona, StoryBatch, AppState, CameraSettings, CreatorAttributes } from './types';
+import ModelSettings from './components/ModelSettings';
+import { Persona, StoryBatch, AppState, CameraSettings, CreatorAttributes, ModelType, AspectRatio } from './types';
 import { analyzePersona, planStory, generateStoryBatch, generateStudioImage, generateReferenceImage } from './services/geminiService';
 
 type Tab = 'story' | 'studio' | 'maker';
@@ -16,6 +18,10 @@ const App: React.FC = () => {
   const [refImage, setRefImage] = useState<string | null>(null);
   const [persona, setPersona] = useState<Persona | null>(null);
   
+  // Global Generation Settings
+  const [modelType, setModelType] = useState<ModelType>('standard');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
+
   // Story Mode State
   const [stories, setStories] = useState<StoryBatch[]>([]);
   const [scenarioInput, setScenarioInput] = useState("");
@@ -50,12 +56,18 @@ const App: React.FC = () => {
     checkApiKey();
   }, []);
 
+  // Clear error when settings change
+  useEffect(() => {
+    if (error) setError(null);
+  }, [modelType, aspectRatio]);
+
   const handleSaveApiKey = () => {
     if (tempApiKey.trim()) {
       localStorage.setItem('gemini_api_key', tempApiKey.trim());
       setTempApiKey("");
       setShowApiKeyModal(false);
       checkApiKey();
+      setError(null); // Clear errors after new key
     }
   };
 
@@ -86,8 +98,8 @@ const App: React.FC = () => {
     setPersona(null);
 
     try {
-      // 1. Generate the base image
-      const generatedImage = await generateReferenceImage(attrs);
+      // 1. Generate the base image (Using current settings)
+      const generatedImage = await generateReferenceImage(attrs, modelType, aspectRatio);
       setRefImage(generatedImage);
 
       // 2. Analyze the generated image to create the profile text
@@ -114,7 +126,7 @@ const App: React.FC = () => {
       const prompts = await planStory(persona, currentScenario);
       
       setAppState(AppState.GENERATING);
-      const generatedImages = await generateStoryBatch(refImage, prompts);
+      const generatedImages = await generateStoryBatch(refImage, prompts, modelType, aspectRatio);
       
       if (generatedImages.length === 0) throw new Error("Failed to generate any images.");
 
@@ -146,7 +158,7 @@ const App: React.FC = () => {
     setError(null);
 
     try {
-      const result = await generateStudioImage(refImage, cameraSettings, persona);
+      const result = await generateStudioImage(refImage, cameraSettings, persona, modelType, aspectRatio);
       
       const newBatch: StoryBatch = {
         id: Date.now().toString(),
@@ -174,6 +186,7 @@ const App: React.FC = () => {
     setStories([]);
     setScenarioInput("");
     setAppState(AppState.IDLE);
+    setError(null);
   };
 
   return (
@@ -248,6 +261,15 @@ const App: React.FC = () => {
           
           {/* Left Column: Input & Controls */}
           <div className="lg:col-span-4 space-y-8">
+
+            {/* Global Settings for Model & Aspect Ratio */}
+            <ModelSettings 
+              modelType={modelType} 
+              setModelType={setModelType} 
+              aspectRatio={aspectRatio}
+              setAspectRatio={setAspectRatio}
+              disabled={appState === AppState.GENERATING || appState === AppState.PLANNING}
+            />
             
             {/* Conditional Rendering based on Tab */}
             {activeTab === 'maker' ? (
@@ -313,9 +335,12 @@ const App: React.FC = () => {
             )}
 
             {error && (
-               <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg flex items-start gap-2">
-                 <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                 {error}
+               <div className="mt-4 p-4 bg-red-900/20 border border-red-500/30 text-red-200 text-sm rounded-xl flex items-start gap-3 shadow-lg animate-in fade-in slide-in-from-top-2">
+                 <AlertTriangle size={20} className="mt-0.5 shrink-0 text-red-400" />
+                 <div>
+                    <span className="font-bold block mb-1">Error</span>
+                    {error}
+                 </div>
                </div>
             )}
           </div>

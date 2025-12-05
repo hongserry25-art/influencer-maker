@@ -1,3 +1,4 @@
+
 export interface Persona {
   nickname: string;
   age: string;          // e.g., "20대 중반"
@@ -51,3 +52,6 @@ export enum AppState {
   SUCCESS = 'SUCCESS',
   ERROR = 'ERROR'
 }
+
+export type ModelType = 'standard' | 'pro';
+export type AspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';

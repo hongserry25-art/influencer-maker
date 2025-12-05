@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { Persona, CameraSettings, CreatorAttributes } from "../types";
+import { Persona, CameraSettings, CreatorAttributes, ModelType, AspectRatio } from "../types";
 
 // Helper to get the AI client with the latest key
 const getAiClient = () => {
@@ -14,10 +15,37 @@ const cleanBase64 = (base64Data: string): string => {
   return base64Data.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 };
 
+const getModelName = (type: ModelType) => {
+  return type === 'pro' ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
+};
+
+// Centralized error handler
+const handleGeminiError = (error: any, modelType?: ModelType) => {
+  console.error("Gemini Operation Error:", error);
+  const msg = error.message || error.toString();
+  
+  if (msg.includes("403") || msg.includes("PERMISSION_DENIED")) {
+    if (modelType === 'pro') {
+      throw new Error("Access Denied (403). 'Banana Pro' requires a Google Cloud Project with Billing enabled. Please switch to 'Flash Lite' or use a paid API key.");
+    }
+    throw new Error("Access Denied (403). Please check if your API Key is valid and has permissions for the Generative AI API.");
+  }
+  
+  if (msg.includes("429")) {
+    throw new Error("Quota Exceeded (429). You are generating too fast. Please wait a moment.");
+  }
+
+  throw error;
+};
+
 /**
  * Step 0: Generate a base Reference Image from scratch (Maker Mode)
  */
-export const generateReferenceImage = async (attrs: CreatorAttributes): Promise<string> => {
+export const generateReferenceImage = async (
+  attrs: CreatorAttributes, 
+  modelType: ModelType = 'standard',
+  aspectRatio: AspectRatio = '1:1'
+): Promise<string> => {
   const ai = getAiClient();
   
   const prompt = `
@@ -43,13 +71,13 @@ export const generateReferenceImage = async (attrs: CreatorAttributes): Promise<
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: getModelName(modelType),
       contents: {
         parts: [{ text: prompt }]
       },
       config: {
         imageConfig: {
-          aspectRatio: "1:1",
+          aspectRatio: aspectRatio,
         }
       }
     });
@@ -68,8 +96,8 @@ export const generateReferenceImage = async (attrs: CreatorAttributes): Promise<
     }
     throw new Error("No image generated.");
   } catch (error: any) {
-    console.error("Reference Generation Error:", error);
-    throw new Error(error.message || "Failed to generate reference image");
+    handleGeminiError(error, modelType);
+    throw new Error("Failed to generate reference image");
   }
 };
 
@@ -94,35 +122,40 @@ export const analyzePersona = async (referenceImageBase64: string): Promise<Pers
     8. **해시태그**: 관련 태그 3~4개
   `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: {
-      parts: [
-        { text: prompt },
-        { inlineData: { mimeType: 'image/jpeg', data: cleanBase64(referenceImageBase64) } }
-      ]
-    },
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          nickname: { type: Type.STRING },
-          age: { type: Type.STRING },
-          occupation: { type: Type.STRING },
-          personality: { type: Type.STRING },
-          lifestyle: { type: Type.STRING },
-          vibe: { type: Type.STRING },
-          description: { type: Type.STRING },
-          hashtags: { type: Type.ARRAY, items: { type: Type.STRING } }
-        },
-        required: ["nickname", "age", "occupation", "personality", "lifestyle", "vibe", "description", "hashtags"]
-      } as Schema
-    }
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType: 'image/jpeg', data: cleanBase64(referenceImageBase64) } }
+        ]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            nickname: { type: Type.STRING },
+            age: { type: Type.STRING },
+            occupation: { type: Type.STRING },
+            personality: { type: Type.STRING },
+            lifestyle: { type: Type.STRING },
+            vibe: { type: Type.STRING },
+            description: { type: Type.STRING },
+            hashtags: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ["nickname", "age", "occupation", "personality", "lifestyle", "vibe", "description", "hashtags"]
+        } as Schema
+      }
+    });
 
-  if (!response.text) throw new Error("Failed to generate persona");
-  return JSON.parse(response.text) as Persona;
+    if (!response.text) throw new Error("Failed to generate persona");
+    return JSON.parse(response.text) as Persona;
+  } catch (error) {
+    handleGeminiError(error);
+    return {} as Persona; // Unreachable
+  }
 };
 
 /**
@@ -155,26 +188,36 @@ export const planStory = async (persona: Persona, userScenario?: string): Promis
     - Keep the outfit relatively consistent within the story.
   `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: baseContext,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING }
-      } as Schema
-    }
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: baseContext,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING }
+        } as Schema
+      }
+    });
 
-  if (!response.text) throw new Error("Failed to plan story");
-  return JSON.parse(response.text) as string[];
+    if (!response.text) throw new Error("Failed to plan story");
+    return JSON.parse(response.text) as string[];
+  } catch (error) {
+    handleGeminiError(error);
+    return []; // Unreachable
+  }
 };
 
 /**
  * Helper: Generate image from prompt
  */
-const generateSingleImage = async (referenceImageBase64: string, prompt: string): Promise<string> => {
+const generateSingleImage = async (
+  referenceImageBase64: string, 
+  prompt: string, 
+  modelType: ModelType,
+  aspectRatio: AspectRatio
+): Promise<string> => {
   const ai = getAiClient();
 
   const fullPrompt = `
@@ -187,25 +230,35 @@ const generateSingleImage = async (referenceImageBase64: string, prompt: string)
     STYLE: 4k, cinematic, social media aesthetic, high detail.
   `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-image',
-    contents: {
-      parts: [
-        { text: fullPrompt },
-        { inlineData: { mimeType: 'image/jpeg', data: cleanBase64(referenceImageBase64) } }
-      ]
-    }
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: getModelName(modelType),
+      contents: {
+        parts: [
+          { text: fullPrompt },
+          { inlineData: { mimeType: 'image/jpeg', data: cleanBase64(referenceImageBase64) } }
+        ]
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: aspectRatio,
+        }
+      }
+    });
 
-  if (response.candidates && response.candidates.length > 0) {
-    const parts = response.candidates[0].content.parts;
-    for (const part of parts) {
-      if (part.inlineData && part.inlineData.data) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+    if (response.candidates && response.candidates.length > 0) {
+      const parts = response.candidates[0].content.parts;
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+          return `data:image/png;base64,${part.inlineData.data}`;
+        }
       }
     }
+    throw new Error("No image generated");
+  } catch (error) {
+    // We re-throw here so the batch processor can catch it
+    throw error;
   }
-  throw new Error("No image generated");
 };
 
 /**
@@ -214,7 +267,9 @@ const generateSingleImage = async (referenceImageBase64: string, prompt: string)
 export const generateStudioImage = async (
   referenceImageBase64: string,
   settings: CameraSettings,
-  persona: Persona
+  persona: Persona,
+  modelType: ModelType,
+  aspectRatio: AspectRatio
 ): Promise<{ url: string; prompt: string }> => {
   
   // Construct camera prompt
@@ -245,8 +300,13 @@ export const generateStudioImage = async (
     Lighting should be high-quality studio lighting.
   `;
 
-  const url = await generateSingleImage(referenceImageBase64, prompt);
-  return { url, prompt };
+  try {
+    const url = await generateSingleImage(referenceImageBase64, prompt, modelType, aspectRatio);
+    return { url, prompt };
+  } catch (error) {
+    handleGeminiError(error, modelType);
+    return { url: '', prompt: '' }; // Unreachable
+  }
 };
 
 /**
@@ -254,19 +314,32 @@ export const generateStudioImage = async (
  */
 export const generateStoryBatch = async (
   referenceImageBase64: string,
-  prompts: string[]
+  prompts: string[],
+  modelType: ModelType,
+  aspectRatio: AspectRatio
 ): Promise<{ url: string; prompt: string }[]> => {
   
+  // Map promises to handle individual failures but detect fatal errors
   const promises = prompts.map(async (prompt) => {
     try {
-      const url = await generateSingleImage(referenceImageBase64, prompt);
-      return { url, prompt, success: true };
-    } catch (e) {
-      console.error("Failed to generate frame:", prompt, e);
-      return { url: '', prompt, success: false };
+      const url = await generateSingleImage(referenceImageBase64, prompt, modelType, aspectRatio);
+      return { url, prompt, success: true, error: null };
+    } catch (e: any) {
+      console.warn("Frame gen failed:", prompt, e.message);
+      return { url: '', prompt, success: false, error: e };
     }
   });
 
   const results = await Promise.all(promises);
+
+  // Check for fatal 403 errors across any of the requests
+  const fatalError = results.find(r => 
+    r.error && (r.error.message?.includes("403") || r.error.message?.includes("PERMISSION_DENIED"))
+  );
+
+  if (fatalError) {
+    handleGeminiError(fatalError.error, modelType);
+  }
+
   return results.filter(r => r.success && r.url).map(r => ({ url: r.url, prompt: r.prompt }));
 };
