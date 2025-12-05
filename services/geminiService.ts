@@ -1,7 +1,14 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { Persona, CameraSettings, CreatorAttributes } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper to get the AI client with the latest key
+const getAiClient = () => {
+  const apiKey = localStorage.getItem('gemini_api_key') || process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API Key not found. Please click the Key icon to register your API Key.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 const cleanBase64 = (base64Data: string): string => {
   return base64Data.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
@@ -11,8 +18,8 @@ const cleanBase64 = (base64Data: string): string => {
  * Step 0: Generate a base Reference Image from scratch (Maker Mode)
  */
 export const generateReferenceImage = async (attrs: CreatorAttributes): Promise<string> => {
-  // Construct a detailed prompt based on the new attributes
-  // Refined to focus on visual descriptions rather than strict biometrics to avoid safety filters
+  const ai = getAiClient();
+  
   const prompt = `
     Generate a high-quality, photorealistic portrait of a virtual fashion model.
     
@@ -43,7 +50,6 @@ export const generateReferenceImage = async (attrs: CreatorAttributes): Promise<
       config: {
         imageConfig: {
           aspectRatio: "1:1",
-          // imageSize is not supported in gemini-2.5-flash-image
         }
       }
     });
@@ -55,7 +61,6 @@ export const generateReferenceImage = async (attrs: CreatorAttributes): Promise<
           return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
-      // Check for text refusal
       const textPart = parts.find(p => p.text);
       if (textPart?.text) {
         throw new Error(`Model refused: ${textPart.text}`);
@@ -72,6 +77,8 @@ export const generateReferenceImage = async (attrs: CreatorAttributes): Promise<
  * Step 1: Analyze the image to create a Detailed Persona (IN KOREAN)
  */
 export const analyzePersona = async (referenceImageBase64: string): Promise<Persona> => {
+  const ai = getAiClient();
+  
   const prompt = `
     이 사진 속 인물의 시각적 특징을 깊이 분석하여 구체적인 "인플루언서 페르소나"를 설정해주세요.
     응답은 반드시 **한국어(Korean)**로 작성해야 합니다.
@@ -119,9 +126,11 @@ export const analyzePersona = async (referenceImageBase64: string): Promise<Pers
 };
 
 /**
- * Step 2: Plan the story (Generate 8 prompts) using the detailed persona
+ * Step 2: Plan the story (Generate 8 prompts)
  */
 export const planStory = async (persona: Persona, userScenario?: string): Promise<string[]> => {
+  const ai = getAiClient();
+
   const baseContext = `
     We are creating a photo series (8 images) for a virtual influencer.
     
@@ -141,10 +150,9 @@ export const planStory = async (persona: Persona, userScenario?: string): Promis
     
     REQUIREMENTS:
     - Return exactly 8 distinct image prompts.
-    - **LOCATION CONSISTENCY (CRITICAL)**: The background and location MUST remain consistent across all 8 frames to create a continuous narrative (e.g., if they are at a specific cafe, all 8 photos are at that cafe). Do not jump between unrelated locations unless the scenario specifically asks to travel.
+    - **LOCATION CONSISTENCY (CRITICAL)**: The background and location MUST remain consistent across all 8 frames.
     - Each prompt must describe the outfit, background, action, and lighting.
-    - Keep the outfit relatively consistent (or logically changing, e.g., jacket on/off) within the story.
-    - Make the scenes visually diverse (close-ups, wide shots, dynamic angles) while maintaining the same location context.
+    - Keep the outfit relatively consistent within the story.
   `;
 
   const response = await ai.models.generateContent({
@@ -167,6 +175,8 @@ export const planStory = async (persona: Persona, userScenario?: string): Promis
  * Helper: Generate image from prompt
  */
 const generateSingleImage = async (referenceImageBase64: string, prompt: string): Promise<string> => {
+  const ai = getAiClient();
+
   const fullPrompt = `
     Generate a photorealistic influencer photo based on the reference person.
     
@@ -199,7 +209,7 @@ const generateSingleImage = async (referenceImageBase64: string, prompt: string)
 };
 
 /**
- * Studio Mode: Generate image with specific camera settings
+ * Studio Mode
  */
 export const generateStudioImage = async (
   referenceImageBase64: string,
@@ -209,25 +219,20 @@ export const generateStudioImage = async (
   
   // Construct camera prompt
   let cameraDescription = "";
-  
-  // Rotation
   if (settings.rotation < -10) cameraDescription += `Profile view from the left (${Math.abs(settings.rotation)} degrees), `;
   else if (settings.rotation > 10) cameraDescription += `Profile view from the right (${settings.rotation} degrees), `;
   else cameraDescription += "Front facing view, ";
 
-  // Vertical Angle
-  if (settings.vertical < -0.3) cameraDescription += "Low angle shot (worm's eye view), looking up at the subject, ";
-  else if (settings.vertical > 0.3) cameraDescription += "High angle shot (bird's eye view), looking down at the subject, ";
+  if (settings.vertical < -0.3) cameraDescription += "Low angle shot (worm's eye view), ";
+  else if (settings.vertical > 0.3) cameraDescription += "High angle shot (bird's eye view), ";
   else cameraDescription += "Eye-level shot, ";
 
-  // Zoom
   if (settings.zoom > 7) cameraDescription += "Extreme close-up on face, detailed features, ";
   else if (settings.zoom > 3) cameraDescription += "Medium close-up (head and shoulders), ";
   else cameraDescription += "Full body shot, ";
 
-  // Lens
-  if (settings.isWideAngle) cameraDescription += "Shot with a wide-angle lens (16mm), slightly distorted perspective, dynamic background, ";
-  else cameraDescription += "Shot with a portrait lens (85mm), compressed background, ";
+  if (settings.isWideAngle) cameraDescription += "Shot with a wide-angle lens (16mm), slightly distorted perspective, ";
+  else cameraDescription += "Shot with a portrait lens (85mm), ";
 
   const prompt = `
     Studio photography session of ${persona.nickname}. 
@@ -245,7 +250,7 @@ export const generateStudioImage = async (
 };
 
 /**
- * Orchestrator: Generate the full story (8 images)
+ * Orchestrator
  */
 export const generateStoryBatch = async (
   referenceImageBase64: string,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Info, AlertTriangle, Loader2, Camera, Clapperboard, UserPlus } from 'lucide-react';
+import { Sparkles, Info, AlertTriangle, Loader2, Camera, Clapperboard, UserPlus, Key } from 'lucide-react';
 import PhotoUploader from './components/PhotoUploader';
 import Controls from './components/Controls';
 import CameraControls from './components/CameraControls';
@@ -31,12 +31,33 @@ const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [apiKeyError, setApiKeyError] = useState(false);
+  
+  // API Key Management
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState("");
+
+  const checkApiKey = () => {
+    const hasEnvKey = !!process.env.API_KEY;
+    const hasLocalKey = !!localStorage.getItem('gemini_api_key');
+    if (!hasEnvKey && !hasLocalKey) {
+      setApiKeyError(true);
+    } else {
+      setApiKeyError(false);
+    }
+  };
 
   useEffect(() => {
-    if (!process.env.API_KEY) {
-      setApiKeyError(true);
-    }
+    checkApiKey();
   }, []);
+
+  const handleSaveApiKey = () => {
+    if (tempApiKey.trim()) {
+      localStorage.setItem('gemini_api_key', tempApiKey.trim());
+      setTempApiKey("");
+      setShowApiKeyModal(false);
+      checkApiKey();
+    }
+  };
 
   // When image uploads, analyze persona immediately
   const handleImageSelect = async (base64: string) => {
@@ -53,7 +74,7 @@ const App: React.FC = () => {
       setAppState(AppState.IDLE);
     } catch (err: any) {
       console.error(err);
-      setError("Could not analyze persona. Please try a clearer photo.");
+      setError("Could not analyze persona. Please try a clearer photo or check your API key.");
       setAppState(AppState.ERROR);
     }
   };
@@ -168,25 +189,36 @@ const App: React.FC = () => {
               Influencer<span className="text-white/90">AI</span>
             </h1>
           </div>
-          <div className="flex items-center gap-1 bg-black/20 p-1 rounded-full border border-white/10 backdrop-blur-sm">
-             <button 
-               onClick={() => setActiveTab('story')}
-               className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'story' ? 'bg-white text-[#9B69FF] shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
-             >
-               <Clapperboard size={14} /> Story Mode
-             </button>
-             <button 
-               onClick={() => setActiveTab('studio')}
-               className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'studio' ? 'bg-white text-[#9B69FF] shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
-             >
-               <Camera size={14} /> Studio Mode
-             </button>
-             <button 
-               onClick={() => setActiveTab('maker')}
-               className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'maker' ? 'bg-white text-[#9B69FF] shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
-             >
-               <UserPlus size={14} /> Maker
-             </button>
+          
+          <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-1 bg-black/20 p-1 rounded-full border border-white/10 backdrop-blur-sm mr-2">
+              <button 
+                onClick={() => setActiveTab('story')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'story' ? 'bg-white text-[#9B69FF] shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
+              >
+                <Clapperboard size={14} /> Story Mode
+              </button>
+              <button 
+                onClick={() => setActiveTab('studio')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'studio' ? 'bg-white text-[#9B69FF] shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
+              >
+                <Camera size={14} /> Studio Mode
+              </button>
+              <button 
+                onClick={() => setActiveTab('maker')}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${activeTab === 'maker' ? 'bg-white text-[#9B69FF] shadow-sm' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
+              >
+                <UserPlus size={14} /> Maker
+              </button>
+            </div>
+            
+            <button 
+               onClick={() => setShowApiKeyModal(true)}
+               className="bg-white/20 hover:bg-white/30 text-white p-2 rounded-full backdrop-blur-sm transition-colors"
+               title="Set API Key"
+            >
+               <Key size={18} />
+            </button>
           </div>
         </div>
       </nav>
@@ -195,12 +227,20 @@ const App: React.FC = () => {
       <main className="max-w-7xl mx-auto px-6 py-10">
         
         {apiKeyError && (
-           <div className="mb-8 bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-3 text-red-200">
-             <AlertTriangle className="shrink-0" />
-             <div>
-               <p className="font-bold">Missing API Key</p>
-               <p className="text-sm opacity-80">This app requires a valid Gemini API key in `process.env.API_KEY` to function.</p>
+           <div className="mb-8 bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-red-200">
+             <div className="flex items-center gap-3">
+               <AlertTriangle className="shrink-0" />
+               <div>
+                 <p className="font-bold">Missing API Key</p>
+                 <p className="text-sm opacity-80">Please provide a valid Gemini API Key to use this application.</p>
+               </div>
              </div>
+             <button 
+                onClick={() => setShowApiKeyModal(true)}
+                className="bg-red-500/20 hover:bg-red-500/30 text-red-100 px-4 py-2 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap"
+             >
+                Register API Key
+             </button>
            </div>
         )}
 
@@ -273,7 +313,8 @@ const App: React.FC = () => {
             )}
 
             {error && (
-               <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg">
+               <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg flex items-start gap-2">
+                 <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                  {error}
                </div>
             )}
@@ -307,6 +348,52 @@ const App: React.FC = () => {
              </div>
           </div>
         </div>
+
+        {/* API Key Modal */}
+        {showApiKeyModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-zinc-900 border border-zinc-700 p-6 rounded-2xl w-full max-w-md shadow-2xl scale-100">
+               <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                 <Key className="text-purple-500" /> Set API Key
+               </h3>
+               <p className="text-zinc-400 text-sm mb-4 leading-relaxed">
+                 To use this app, you need a valid Gemini API key. 
+                 The key is stored securely in your browser's local storage.
+               </p>
+               
+               <div className="space-y-4">
+                 <input 
+                   type="password" 
+                   placeholder="Enter your Gemini API Key (AI...)" 
+                   value={tempApiKey}
+                   onChange={e => setTempApiKey(e.target.value)}
+                   className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all"
+                 />
+                 
+                 <div className="flex justify-end gap-3 pt-2">
+                   <button 
+                     onClick={() => setShowApiKeyModal(false)} 
+                     className="px-4 py-2 text-zinc-400 hover:text-white text-sm font-medium transition-colors"
+                   >
+                     Cancel
+                   </button>
+                   <button 
+                     onClick={handleSaveApiKey} 
+                     disabled={!tempApiKey.trim()}
+                     className="px-6 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white rounded-lg text-sm font-bold transition-all"
+                   >
+                     Save Key
+                   </button>
+                 </div>
+               </div>
+               
+               <p className="mt-4 text-xs text-zinc-600 text-center">
+                  Don't have a key? <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-purple-400 hover:underline">Get one here</a>
+               </p>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
